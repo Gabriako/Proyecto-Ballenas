@@ -1,0 +1,14 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Entornos virtuales
+venv/
+env/
+.env
+
+# Archivos del modelo entrenado (Opcional: Si pesa mucho, mejor no subirlo)
+*.pkl
+
+# Logs o archivos temporales de MT5
+*.log
