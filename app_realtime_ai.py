@@ -12,17 +12,17 @@ def run_ai_monitor():
     if not data_loader.initialize_mt5():
         return
 
-    print(f"\n--- 🧠 Monitor IA Manos Fuertes: {config.SYMBOL} ({config.TIMEFRAME}m) ---")
-    print(f"   Estrategia: CVD Sintético + Random Forest")
+    print(f"\n--- MONITOR IA MANOS FUERTES: {config.SYMBOL} ({config.TIMEFRAME}m) ---")
+    print(f"   Estrategia: CVD Sintetico + Random Forest")
     print("------------------------------------------------------------------")
     
     if ai_logic.load_model() is None:
-        print("❌ DETENIDO: Entrena el modelo primero con 'python train_model.py'")
+        print("XXX DETENIDO: Entrena el modelo primero con 'python train_model.py'")
         return
     
-    print("✅ Modelo cargado. Esperando cierre de vela... (Ctrl+C para salir)\n")
+    print(">>> Modelo cargado. Esperando cierre de vela... (Ctrl+C para salir)\n")
 
-    # Variable para recordar la última vela que ya avisamos
+    # Variable para recordar la última vela procesada
     last_processed_time = None
 
     try:
@@ -41,63 +41,51 @@ def run_ai_monitor():
                 df_features = feature_engineering.create_dataset(df_candles, cvd)
                 
                 if not df_features.is_empty():
-                    # Tomamos la última vela CERRADA (la penúltima de la lista)
+                    # Tomamos la última vela CERRADA
                     last_closed_candle = df_features.row(-2, named=True)
-                    candle_time = last_closed_candle['time'] # La hora de esa vela
+                    candle_time = last_closed_candle['time']
                     
-                    # --- FILTRO ANTI-REPETICIÓN ---
-                    # Si la hora de esta vela es diferente a la última que procesamos, actuamos.
+                    # --- FILTRO: Solo actuar si es una vela nueva ---
                     if candle_time != last_processed_time:
-                        
-                        # Guardamos esta hora para no repetirla
                         last_processed_time = candle_time
                         
                         # --- PASO C: Predicción ---
-                        # Usamos 'current_candle' solo para mostrar el precio actual en vivo
+                        # current_candle solo para mostrar precio actual
                         current_candle = df_features.row(-1, named=True)
-                        
                         state_text, signal = ai_logic.predict_market_state(last_closed_candle)
                         
-                        # --- PASO D: Mostrar en Consola ---
-                        price = current_candle['close']
-                        z_val = last_closed_candle['z_score'] # Z-Score de la vela cerrada
+                        # Limpiamos el texto de la IA (quitamos colores internos si los hubiera)
+                        # Aunque ai_logic ya devuelve texto limpio, aseguramos formato aquí.
+                        clean_state = state_text.replace("IA:", "").strip()
                         
-                        # Colores
-                        RESET = "\033[0m"
-                        RED = "\033[91m"
-                        GREEN = "\033[92m"
-                        YELLOW = "\033[93m"
+                        # --- PASO D: Mostrar en Consola (Formato Clásico) ---
+                        price = last_closed_candle['close']
+                        z_val = last_closed_candle['z_score']
                         
-                        color = RESET
-                        icon = ""
+                        # Iconos simples de texto
+                        icon = "[---]"
+                        if signal == 1: icon = "[COMPRA]"
+                        elif signal == -1: icon = "[VENTA]"
+                        elif "DUDOSA" in clean_state: icon = "[?]"
                         
-                        if signal == 1: 
-                            color = GREEN
-                            icon = " 🚀 COMPRA"
-                        elif signal == -1: 
-                            color = RED
-                            icon = " 🔻 VENTA"
-                        elif "DUDOSA" in state_text:
-                            color = YELLOW
+                        # Imprimir línea limpia
+                        print(f"Hora: {candle_time} | Precio: {price:.2f} | Z-Score: {z_val:.2f} | {icon} {clean_state}")
                         
-                        # Imprimir reporte limpio
-                        print(f"[{candle_time}] Cierre: {last_closed_candle['close']:.2f} | Z: {z_val:.2f} | {color}{state_text}{icon}{RESET}")
-                        
-                        # Si hay señal fuerte, hacemos ruido extra
+                        # Alerta visual extra con guiones si hay señal
                         if signal != 0:
-                            print(f"   >>> 🔔 ALERTA DE IA: {icon} DETECTADA EN {price:.2f}")
-                            print("-" * 60)
+                            print(f"**************************************************")
+                            print(f"*** ALERTA: SENAL DETECTADA -> {icon} ***")
+                            print(f"**************************************************")
             
-            # Esperar 10 segundos antes de volver a chequear
-            # (Ahora podemos chequear más rápido sin molestar)
+            # Esperar 10 segundos
             time.sleep(10)
 
     except KeyboardInterrupt:
-        print("\n👋 Monitor apagado.")
+        print("\nMonitor apagado.")
         import MetaTrader5 as mt5
         mt5.shutdown()
     except Exception as e:
-        print(f"❌ Error inesperado: {e}")
+        print(f"Error inesperado: {e}")
 
 if __name__ == "__main__":
     run_ai_monitor()
