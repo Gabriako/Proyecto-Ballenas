@@ -12,3 +12,4 @@ env/
 
 # Logs o archivos temporales de MT5
 *.log
+.vscode/sftp.json
