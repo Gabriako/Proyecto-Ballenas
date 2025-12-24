@@ -54,3 +54,4 @@ def predict_market_state(row_dict):
             
     except Exception as e:
         return f"Error IA: {e}", 0
+    
