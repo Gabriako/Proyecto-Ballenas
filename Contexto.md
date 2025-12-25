@@ -36,25 +36,27 @@ Los regimenes se calcularon desde un archivo llamado Dataset_Con_Regimenes.csv q
 | **Close_Price** | Float | `iClose` | Precio de cierre de la vela en M1. |
 | **Deal_Ticket** | Int | Fijo (`0`) | *Placeholder*. Reservado para el ID de la transacción en el broker. |
 | **Real_Profit** | Float | Fijo (`0`) | *Placeholder*. Reservado para el beneficio futuro calculado (target de regresión). |
-| **prob_regimen_0** | Float | Sensor | *Placeholder*. Reservado para el ID de la transacción en el broker. |
-| **prob_regimen_1** | Float | Sensor | *Placeholder*. Reservado para el ID de la transacción en el broker. |
-| **prob_regimen_2** | Float | Sensor | *Placeholder*. Reservado para el ID de la transacción en el broker. |
-| **prob_regimen_3** | Float | Sensor | *Placeholder*. Reservado para el ID de la transacción en el broker. |
-| **prob_regimen_4** | Float | Sensor | *Placeholder*. Reservado para el ID de la transacción en el broker. |
-| **prob_regimen_5** | Float | Sensor | *Placeholder*. Reservado para el ID de la transacción en el broker. |
-| **prob_regimen_6** | Float | Sensor | *Placeholder*. Reservado para el ID de la transacción en el broker. |
+| **prob_regimen_0** | Float | Sensor | Probabilidad de estar en regimen 0 - Canal lateral |
+| **prob_regimen_1** | Float | Sensor | Probabilidad de estar en regimen 1 - Canal alcista Volatilidad Baja |
+| **prob_regimen_2** | Float | Sensor | Probabilidad de estar en regimen 2 - Canal bajista Volatilidad Baja |
+| **prob_regimen_3** | Float | Sensor | Probabilidad de estar en regimen 3 - Canal alcista Volatilidad Alta |
+| **prob_regimen_4** | Float | Sensor | Probabilidad de estar en regimen 4 - Canal bajista Volatilidad Alta |
+| **prob_regimen_5** | Float | Sensor | Probabilidad de estar en regimen 5 - Tendencia Alcista Clara |
+| **prob_regimen_6** | Float | Sensor | Probabilidad de estar en regimen 6 - Tendencia Bajista Clara |
 
-Etapa 1. Sistema manual de ordenes que realizaré tomando los resultados de esta caja negra
+Ojo que hay muchas columnas que no se usan en primera instancia
+
+Etapa 1. Sistema manual de ordenes que realizaré tomando los resultados de esta caja negra.
+Etapa 2. Sistema automatizado basado en el mismo contexto.
+
+Actualmente hicimos una prueba y creamos un tag de GitHub que se llama v1.0-alpha. Al terminar la Etapa 1 vamos a setear la versión en v1.0-Beta. Y al terminar la Etapa 2, la versión será v2.0-alpha.
 
 ## 2. Reglas Críticas (A MEMORIZAR)
-- NO borrar comentarios existentes.
-- Usar nombres de variables en inglés, comentarios en español.
-- Manejo de errores con `try/except` en todas las funciones de I/O.
+- Se deben usar librerias de clasificacion en Python como scikit-learn, redes neuronales y optuna para probar y configurar las mejores opciones.
+- A pesar que los datos los obtuvimos desde el tester de MT5, podemos usar y debemos usar la libreria de Metatrader 5 para conectar Python con Metatrader y determinar los parametros para cuando trabajemos en la Etapa 1 y 2.
+- Se debe trabajar modularmente en python, creando un arbol de archivos que sean simples de entender y escalables. 
+- Lo primero que se debe hacer es crear la estructura de archivos python que se trabajaran en el sistema
 
-## 3. Estado Actual (Actualizar siempre)
-- [x] Conexión a Base de datos lista.
-- [x] Interfaz gráfica básica (Tkinter).
-- [ ] Falta la función de "Exportar a Excel". <--- ESTAMOS AQUÍ
 
 ## 4. Archivos Clave
 - `main.py`: Punto de entrada.
