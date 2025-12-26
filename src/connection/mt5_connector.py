@@ -1,6 +1,6 @@
 import MetaTrader5 as mt5
 import polars as pl
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys
 
 class MT5Connector:
@@ -11,21 +11,11 @@ class MT5Connector:
         self.connected = False
 
     def conectar(self):
-        """Inicia conexión con MT5. Retorna True si es exitoso."""
         if not mt5.initialize():
             print(f"Error al inicializar MT5: {mt5.last_error()}", file=sys.stderr)
             self.connected = False
             return False
         
-        # Si se requieren credenciales específicas (opcional si MT5 ya está logueado)
-        if self.login and self.password and self.server:
-            authorized = mt5.login(self.login, password=self.password, server=self.server)
-            if not authorized:
-                print(f"Error de Login: {mt5.last_error()}", file=sys.stderr)
-                mt5.shutdown()
-                self.connected = False
-                return False
-
         self.connected = True
         return True
 
@@ -34,68 +24,58 @@ class MT5Connector:
         self.connected = False
 
     def obtener_ticks_recientes(self, symbol: str, num_ticks: int = 1000) -> pl.DataFrame:
-        """
-        Obtiene los últimos N ticks.
-        MANDAMIENTO 7 y 9: Retorna POLARS y solo usa BID/ASK/TIME.
-        """
-        if not self.connected:
-            if not self.conectar():
-                return pl.DataFrame() # Retorno vacío si falla
-
-        # Copiar ticks desde el presente hacia atrás
-        # COPY_TICKS_ALL trae todo, pero filtraremos severamente
-        ticks = mt5.copy_ticks_from(symbol, datetime.now(), num_ticks, mt5.COPY_TICKS_ALL)
-
-        if ticks is None:
-            print(f"Error obteniendo ticks para {symbol}", file=sys.stderr)
-            return pl.DataFrame()
-
-        # Convertir a Polars directamente desde el array estructurado de numpy
-        # Esto es extremadamente eficiente en memoria
-        df = pl.from_numpy(ticks)
-
-        # SELECCIÓN QUIRÚRGICA DE DATOS (MANDAMIENTO 9)
-        # Descartamos 'last', 'volume', 'flags' para análisis, 
-        # aunque flags podría servir para saber si fue buy/sell maker luego.
-        # Por ahora, nos centramos en el flujo de precios Bid/Ask.
-        
-        df_clean = df.select([
-            pl.col("time").alias("timestamp_sec"), # Unix timestamp
-            pl.col("time_msc").alias("timestamp_ms"), # Milisegundos para alta frecuencia
-            pl.col("bid"),
-            pl.col("ask")
-        ])
-
-        # Crear spread para debug (opcional, pero útil)
-        df_clean = df_clean.with_columns(
-            (pl.col("ask") - pl.col("bid")).alias("spread")
-        )
-
-        return df_clean
-
-    def obtener_simbolo_info(self, symbol: str):
-        """Para validar si el mercado está abierto o chequear especificaciones"""
-        return mt5.symbol_info(symbol)
-    
-    # --- AGREGAR ESTO A LA CLASE MT5Connector ---
-    def obtener_velas_recientes(self, symbol: str, timeframe=mt5.TIMEFRAME_M1, num_velas: int = 500) -> pl.DataFrame:
-        """
-        Obtiene velas OHLC para análisis técnico (Contexto).
-        """
         if not self.connected:
             if not self.conectar():
                 return pl.DataFrame()
 
-        rates = mt5.copy_rates_from(symbol, timeframe, datetime.now(), num_velas)
+        # 1. Obtener la hora del servidor (último tick conocido)
+        last_tick = mt5.symbol_info_tick(symbol)
+        if last_tick is None:
+            # Si no hay datos, retornamos vacío
+            return pl.DataFrame()
+            
+        server_time = datetime.fromtimestamp(last_tick.time)
         
-        if rates is None:
-            print(f"Error obteniendo velas para {symbol}", file=sys.stderr)
+        # 2. Definir rango de búsqueda: Desde hace 30 minutos hasta AHORA MISMO (server time)
+        # Esto garantiza que traemos los tics más frescos.
+        date_to = server_time + timedelta(seconds=10) # Un poco en el futuro por si acaso
+        date_from = server_time - timedelta(minutes=30) 
+        
+        # Usamos copy_ticks_range que es más seguro para "atrás hacia adelante"
+        ticks = mt5.copy_ticks_range(symbol, date_from, date_to, mt5.COPY_TICKS_ALL)
+
+        if ticks is None or len(ticks) == 0:
             return pl.DataFrame()
 
-        # Convertir a Polars
+        # 3. Convertir a Polars y tomar solo los últimos N pedidos
+        df = pl.from_numpy(ticks)
+        
+        # Ordenar y cortar
+        df = df.tail(num_ticks)
+
+        # Selección de columnas
+        df_clean = df.select([
+            pl.col("time").alias("timestamp_sec"),
+            pl.col("time_msc").alias("timestamp_ms"),
+            pl.col("bid"),
+            pl.col("ask")
+        ])
+
+        return df_clean
+
+    def obtener_velas_recientes(self, symbol: str, timeframe=mt5.TIMEFRAME_M1, num_velas: int = 500) -> pl.DataFrame:
+        if not self.connected:
+            if not self.conectar():
+                return pl.DataFrame()
+
+        # copy_rates_from_pos trae las últimas N velas desde la posición 0 (actual) hacia atrás
+        rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, num_velas)
+        
+        if rates is None:
+            return pl.DataFrame()
+
         df = pl.from_numpy(rates)
         
-        # Seleccionar y limpiar
         df = df.select([
             pl.col("time").alias("timestamp"),
             pl.col("open"),
