@@ -156,3 +156,5 @@ proyecto_ballenas/
 ├── main_monitor_v1.py         # Orquestador Etapa 1
 ├── requirements.txt           # Dependencias
 └── CONTEXTO.md                # Este archivo
+
+----
