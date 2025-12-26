@@ -27,18 +27,26 @@ def cargar_datos():
         # Manejo inteligente de la Fecha/Hora
         # El monitor guarda una columna 'Timestamp' (string) y 'timestamp' (posiblemente de indicadores)
         # Vamos a intentar parsear la columna de texto que es más legible
+        # Corrección robusta de Timestamp
         if "Timestamp" in df.columns:
-            # Intentar convertir string "2025-12-26..." a datetime
-            try:
+            # Caso 1: Timestamp es número (Unix Epoch en segundos o ms)
+            if df["Timestamp"].dtype in [pl.Int64, pl.Int32, pl.Float64]:
+                # Si el número es muy grande (> 10^11), asumimos milisegundos
+                es_ms = df["Timestamp"].mean() > 10000000000
+                unit = "ms" if es_ms else "s"
+                
                 df = df.with_columns(
-                    pl.col("Timestamp").str.to_datetime(strict=False).alias("datetime")
+                    pl.from_epoch(pl.col("Timestamp"), time_unit=unit).alias("datetime")
                 )
-            except:
-                # Si falla, usamos el índice numérico
-                print("No se pudo parsear la fecha, usando conteo simple.")
-                df = df.with_columns(pl.int_range(0, df.height).alias("datetime"))
+            # Caso 2: Timestamp es String ("2025-...")
+            else:
+                try:
+                    df = df.with_columns(
+                        pl.col("Timestamp").str.to_datetime(strict=False).alias("datetime")
+                    )
+                except:
+                    df = df.with_columns(pl.int_range(0, df.height).alias("datetime"))
         else:
-            # Si no hay columna Timestamp, creamos un indice artificial
             df = df.with_columns(pl.int_range(0, df.height).alias("datetime"))
 
         return df
