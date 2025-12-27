@@ -107,7 +107,7 @@ def update_graph_live(n):
     )
     
     fig.update_yaxes(gridcolor="#333333", row=1, col=1)
-    fig.update_yaxes(range=[-1.1, 1.1], gridcolor="#333333", row=2, col=1)
+    fig.update_yaxes(gridcolor="#333333", row=2, col=1)
     fig.update_yaxes(range=[-0.5, 6.5], tickvals=[0,1,2,3,4,5,6], gridcolor="#333333", row=3, col=1)
     fig.update_xaxes(gridcolor="#333333")
 
