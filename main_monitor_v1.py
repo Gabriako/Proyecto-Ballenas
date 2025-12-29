@@ -14,7 +14,7 @@ sys.path.append(current_dir)
 # --- 2. IMPORTACIONES DEL PROYECTO ---
 from src.connection.mt5_connector import MT5Connector
 from src.features.microstructure import MicrostructureAnalyzer 
-from src.features.indicators import TechnicalIndicators # <--- AHORA SÍ SE USA
+from src.features.indicators import TechnicalIndicators 
 from src.utils.logger import DataLogger
 from src.models.predictor import MarketPredictor
 
@@ -145,7 +145,7 @@ def main():
     if not mt5_con.conectar(): return
 
     micro_analyzer = MicrostructureAnalyzer() 
-    technical_calc = TechnicalIndicators() # Motor Polars
+    technical_calc = TechnicalIndicators() 
     logger = DataLogger() 
     predictor = MarketPredictor() 
     
@@ -157,6 +157,7 @@ def main():
         print(Fore.GREEN + "[IA] Modelos listos para inferencia.")
     
     print("Sincronizando histórico...")
+    # Carga inicial robusta
     df_raw_pl = mt5_con.obtener_velas_recientes(SYMBOL, timeframe=TIMEFRAME, num_velas=HISTORY_BARS)
     
     if df_raw_pl is None or df_raw_pl.height == 0:
@@ -173,13 +174,12 @@ def main():
 
         while True:
             # A. TICK EN TIEMPO REAL
-            # Usamos librería directa porque el conector no tiene método 'tick_actual'
             tick_raw = mt5_lib.symbol_info_tick(SYMBOL)
             
             if tick_raw:
                 tick = tick_raw._asdict()
                 
-                # 1. Acumular Tick (Para Microestructura)
+                # 1. Acumular Tick
                 nuevo_tick = pl.DataFrame({
                     "time": [tick['time']], 
                     "bid": [tick['bid']], 
@@ -190,32 +190,30 @@ def main():
                 
                 try:
                     df_ticks_acumulado = pl.concat([df_ticks_acumulado, nuevo_tick])
-                    # Ventana deslizante de 1000 ticks
                     if df_ticks_acumulado.height > 1000:
                         df_ticks_acumulado = df_ticks_acumulado.tail(1000)
                 except:
                     df_ticks_acumulado = nuevo_tick
 
-                # 2. Análisis Micro (Ballenas)
+                # 2. Análisis Micro
                 metrics_micro = micro_analyzer.analizar_flujo(df_ticks_acumulado)
 
-                # 3. Análisis Macro (Solo si cambia el tiempo o cada X ms)
+                # 3. Análisis Macro
                 ts_actual = int(tick['time'])
                 metrics_macro = {}
                 ia_result = {}
                 
                 if ts_actual > ultimo_segundo:
-                    # B. OBTENER VELAS RECIENTES (Polars)
-                    df_candles = mt5_con.obtener_velas_recientes(SYMBOL, timeframe=TIMEFRAME, num_velas=200)
+                    # B. OBTENER VELAS RECIENTES - CORREGIDO AQUÍ
+                    # Pedimos 1000 velas para que el motor de indicadores (que exige >300) funcione
+                    df_candles = mt5_con.obtener_velas_recientes(SYMBOL, timeframe=TIMEFRAME, num_velas=1000)
                     
-                    if df_candles is not None and df_candles.height > 50:
-                        # C. CALCULAR INDICADORES (Usando el módulo features)
-                        # Retorna un diccionario con la última fila lista
+                    if df_candles is not None and df_candles.height > 300:
+                        # C. CALCULAR INDICADORES
                         metrics_macro = technical_calc.calcular_features(df_candles)
                         
                         # D. PREDICCIÓN IA
                         if predictor.loaded and metrics_macro:
-                            # metrics_macro ya tiene las claves exactas que pide el predictor
                             regimen, probs = predictor.predecir(metrics_macro)
                             
                             ia_result = {
@@ -223,7 +221,6 @@ def main():
                                 "probs": probs
                             }
                             
-                            # Inyectar resultados al macro para el logger
                             metrics_macro["Regimen_Actual"] = regimen
                             metrics_macro["probs"] = probs
                             for i, p in enumerate(probs):
@@ -234,14 +231,12 @@ def main():
                     # E. VISUALIZAR
                     render_dashboard(metrics_micro, metrics_macro, grabando, ia_result)
 
-                    # F. GUARDAR DATOS (Logger + Live Lite)
+                    # F. GUARDAR
                     if metrics_macro and metrics_micro.get("status") == "OK":
                         ts_ms = int(time.time() * 1000)
                         
-                        # 1. Histórico Completo
                         logger.guardar_snapshot(ts_ms, metrics_micro, metrics_macro, df_ticks_acumulado)
                         
-                        # 2. Archivo Ligero para Dashboard Live
                         lite_path = os.path.join("data", "raw", "live_lite.csv")
                         row_lite = [
                             ts_ms,
@@ -261,7 +256,7 @@ def main():
                         
                         grabando = True
 
-            time.sleep(0.01) # 10ms de descanso para no quemar CPU
+            time.sleep(0.01)
 
     except KeyboardInterrupt:
         mt5_con.desconectar()
