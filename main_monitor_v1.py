@@ -11,51 +11,59 @@ import MetaTrader5 as mt5_lib
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
-# --- 2. IMPORTACIONES DEL PROYECTO ---
+# --- 2. IMPORTACIONES ---
 from src.connection.mt5_connector import MT5Connector
 from src.features.microstructure import MicrostructureAnalyzer 
 from src.features.indicators import TechnicalIndicators 
 from src.utils.logger import DataLogger
 from src.models.predictor import MarketPredictor
-from src.strategies.whale_detector import WhaleDetector # <--- CEREBRO ESTRATÉGICO
+from src.strategies.whale_detector import WhaleDetector
+from src.execution.trader import MT5Trader
 
 init(autoreset=True)
 
-# --- CONFIGURACIÓN ---
+# --- CONFIGURACIÓN GENERAL ---
 SYMBOL = "BTCUSD"
 TIMEFRAME = mt5_lib.TIMEFRAME_M1 
 HISTORY_BARS = 1000 
 
+# --- PARÁMETROS GESTIÓN DE RIESGO (GOLDEN MEAN - PROMEDIO OPTIMIZADO) ---
+# Estos valores equilibran la agresividad y la seguridad según tus pruebas
+LOT_SIZE = 0.01          
+MAGIC_NUMBER = 555777    
+OPTUNA_STOP_LOSS = 0.006   # 0.6%
+OPTUNA_TAKE_PROFIT = 0.011 # 1.1%
+
 REGIMEN_MAP = {
     0: "LATERAL",
-    1: "ALCISTA (D)",
-    2: "BAJISTA (D)",
-    3: "ALCISTA (V)",
-    4: "BAJISTA (V)",
-    5: "ALCISTA (F)",
-    6: "BAJISTA (F)"
+    1: "ALCISTA (D)", 2: "BAJISTA (D)",
+    3: "ALCISTA (V)", 4: "BAJISTA (V)",
+    5: "ALCISTA (F)", 6: "BAJISTA (F)"
 }
 
 # --- VISUALIZACIÓN ---
 def limpiar_consola():
     os.system('cls' if os.name == 'nt' else 'clear')
 
-def render_dashboard(micro, macro, grabando, ia_data):
+def render_dashboard(micro, macro, grabando, ia_data, estado_trading):
     limpiar_consola()
     
-    tics_analizados = micro.get('intensidad', 0)
-    
+    # 1. HEADER (Estado del Sistema)
+    tics = micro.get('intensidad', 0)
+    estatus_bot = f"{Back.GREEN}{Fore.WHITE} BOT ACTIVO {Style.RESET_ALL}" if estado_trading else f"{Back.YELLOW}{Fore.BLACK} SOLO MONITOR {Style.RESET_ALL}"
     rec_icon = f"{Back.RED}{Fore.WHITE} ● REC {Style.RESET_ALL}" if grabando else f"{Fore.BLACK}{Back.WHITE} PAUSA {Style.RESET_ALL}"
-    titulo = f" BALLENAS IA | {SYMBOL} | Tics(Win): {tics_analizados} "
-    print(Fore.WHITE + Back.BLUE + Style.BRIGHT + titulo.ljust(60) + Style.RESET_ALL + " " + rec_icon)
-    print("-" * 70)
     
-    # SECCIÓN 1: IA (MACRO)
+    titulo = f" BALLENAS IA | {SYMBOL} | Tics: {tics} "
+    print(Fore.WHITE + Back.BLUE + Style.BRIGHT + titulo.ljust(60) + Style.RESET_ALL + " " + estatus_bot + " " + rec_icon)
+    print("-" * 80)
+    
+    # 2. SECCIÓN IA (Cerebro Completo)
     if ia_data and "regimen" in ia_data:
         reg_id = ia_data["regimen"]
         probs = ia_data["probs"]
         confianza = probs[reg_id] * 100
         
+        # Color según sentimiento
         color_ia = Fore.WHITE
         if reg_id in [5, 3, 1]: color_ia = Fore.GREEN
         if reg_id in [6, 4, 2]: color_ia = Fore.RED
@@ -67,12 +75,13 @@ def render_dashboard(micro, macro, grabando, ia_data):
         print(f"   Decisión Final: {color_ia}{Style.BRIGHT}{reg_nombre}{Style.RESET_ALL} (Confianza: {confianza:.1f}%)")
         print(f"   {Fore.BLACK}{Back.WHITE} DEBATE INTERNO (Probabilidades): {Style.RESET_ALL}")
         
+        # Barra de probabilidad visual
         def fmt_prob(idx, nombre, color_base):
             p = probs[idx] * 100
             estilo = Style.BRIGHT if idx == reg_id else ""
             marcador = "◄ WIN" if idx == reg_id else ""
-            barra = "|" * int(p / 5) 
-            return f"{color_base}{estilo}[{idx}] {nombre:<10}: {p:5.1f}% {barra} {marcador}{Style.RESET_ALL}"
+            barra = "█" * int(p / 5) 
+            return f"{color_base}{estilo}[{idx}] {nombre:<11}: {p:5.1f}% {barra} {marcador}{Style.RESET_ALL}"
 
         print(fmt_prob(0, "LATERAL", Fore.YELLOW))
         print("-" * 40)
@@ -84,111 +93,122 @@ def render_dashboard(micro, macro, grabando, ia_data):
         print(fmt_prob(4, "BAJISTA (V)", Fore.RED))
         print(fmt_prob(6, "BAJISTA (F)", Fore.RED))
     else:
-        print(Fore.YELLOW + "🧠 IA: Esperando datos suficientes para pensar...")
+        print(Fore.YELLOW + "🧠 IA: Recopilando datos para inferencia...")
 
-    print("-" * 70)
+    print("-" * 80)
 
-    # SECCIÓN 2: DATOS TÉCNICOS
+    # 3. SECCIÓN MACRO (Indicadores Técnicos)
+    precio_actual = 0.0
     if macro:
-        precio = macro.get('Close_Price', 0.0)
+        precio_actual = macro.get('Close_Price', 0.0)
         ema = macro.get('EMA_Princ', 0.0)
         rsi = macro.get('RSI_Val', 0.0)
         adx = macro.get('ADX_Val', 0.0)
+        
+        # Colores dinámicos
+        c_rsi = Fore.RED if rsi > 70 else Fore.GREEN if rsi < 30 else Fore.WHITE
+        c_adx = Fore.GREEN if adx > 25 else Fore.YELLOW
+        
         print(f"📊 {Style.BRIGHT}MACRO (M1):{Style.RESET_ALL}")
-        print(f"   Precio    : {Fore.CYAN}{precio:.2f}{Style.RESET_ALL}")
+        print(f"   Precio    : {Fore.CYAN}{precio_actual:.2f}{Style.RESET_ALL}")
         print(f"   EMA Trend : {Fore.YELLOW}{ema:.2f}{Style.RESET_ALL}")
-        print(f"   RSI       : {rsi:.1f}") 
-        print(f"   ADX       : {adx:.1f}") 
+        print(f"   RSI (14)  : {c_rsi}{rsi:.1f}{Style.RESET_ALL}") 
+        print(f"   ADX (14)  : {c_adx}{adx:.1f}{Style.RESET_ALL}") 
     else:
         print("Cargando indicadores macro...")
 
-    print("-" * 70)
+    print("-" * 80)
     
-    # SECCIÓN 3: MICROESTRUCTURA Y ESTRATEGIA
+    # 4. SECCIÓN MICRO (Estrategia y Flow)
     if micro.get("status") == "EMPTY":
         print(Fore.RED + "Esperando flujo de ticks...")
         return
 
-    # A. Visualización Barra Instantánea
+    # A. Datos Instantáneos
     desbalance = micro.get('desbalance', 0.0)
-    bar_length = 30
+    evento = micro.get('evento', "NEUTRAL")
+    presion_avg = micro.get('presion_acumulada', 0.0)
+    
+    # B. Barra Visual de Flow
+    bar_length = 40
     normalized_pos = int((desbalance + 1) / 2 * bar_length)
     normalized_pos = max(0, min(bar_length - 1, normalized_pos))
     
     barra = ["-"] * bar_length
     color_state = Fore.WHITE
-    estado_txt = "NEUTRAL"
     marcador = "|"
     
-    if desbalance > 0.15:
+    if desbalance > 0.09: # Usando el umbral Golden Mean visualmente
         color_state = Fore.GREEN
-        estado_txt = "COMPRA INST."
         marcador = "▲"
-    elif desbalance < -0.15:
+    elif desbalance < -0.09:
         color_state = Fore.RED
-        estado_txt = "VENTA INST."
         marcador = "▼"
         
     barra[normalized_pos] = f"{Style.BRIGHT}{marcador}{Style.RESET_ALL}{color_state}"
     barra_str = "".join(barra)
 
-    # B. Mensajes de Estrategia (5 min)
-    evento = micro.get('evento', "NEUTRAL")
-    presion_avg = micro.get('presion_acumulada', 0.0)
-    
+    # C. Lógica de Estrategia y Objetivos (TP/SL)
     msg_color = Fore.WHITE
-    msg_texto = "RECOPILANDO DATA (Esperando ventana)..."
-    
-    if evento == "ABSORCION_COMPRA":
-        msg_color = Fore.CYAN
-        msg_texto = f"🛡️  ABSORCIÓN (5m): Venta Avg {presion_avg:.2f} vs Precio Sube/Igual"
-    elif evento == "DISTRIBUCION_VENTA":
-        msg_color = Fore.MAGENTA
-        msg_texto = f"🧱 DISTRIBUCIÓN (5m): Compra Avg {presion_avg:.2f} vs Precio Baja/Igual"
-    elif evento == "IMPULSO_ALCISTA":
-        msg_color = Fore.GREEN
-        msg_texto = f"🚀 TENDENCIA (5m): Fuerza Compra Sostenida ({presion_avg:.2f})"
-    elif evento == "IMPULSO_BAJISTA":
-        msg_color = Fore.RED
-        msg_texto = f"📉 TENDENCIA (5m): Fuerza Venta Sostenida ({presion_avg:.2f})"
-    elif evento == "RANGO_NEUTRAL":
-        msg_texto = f"⏸️  NEUTRAL (5m): Presión Avg {presion_avg:.2f}"
+    msg_texto = f"RECOPILANDO (Presión: {presion_avg:.3f})"
+    targets_txt = ""
 
-    print(f"🐋 {Style.BRIGHT}MICRO (Flow):{Style.RESET_ALL}")
-    print(f"   Instantáneo : {color_state}{estado_txt}{Style.RESET_ALL} (Score: {desbalance:.2f})")
-    print(f"   Balance     : [{color_state}{barra_str}{Style.RESET_ALL}]")
-    print("-" * 70)
-    print(f"⏱️ {Style.BRIGHT}ANÁLISIS (5 min): {msg_color}{msg_texto}{Style.RESET_ALL}") 
-    print("-" * 70)
+    if precio_actual > 0:
+        # COMPRA
+        if evento in ["ABSORCION_COMPRA", "IMPULSO_ALCISTA"]:
+            tp_price = precio_actual * (1 + OPTUNA_TAKE_PROFIT)
+            sl_price = precio_actual * (1 - OPTUNA_STOP_LOSS)
+            targets_txt = f"\n   🎯 TP: {Fore.GREEN}{tp_price:.2f}{Style.RESET_ALL} | 🛡️ SL: {Fore.RED}{sl_price:.2f}{Style.RESET_ALL}"
+            
+            if evento == "ABSORCION_COMPRA":
+                msg_color = Fore.CYAN
+                msg_texto = f"🛡️  ABSORCIÓN ALCISTA (Ballenas Comprando)"
+            else:
+                msg_color = Fore.GREEN
+                msg_texto = f"🚀 IMPULSO ALCISTA (Confirmado)"
+
+        # VENTA
+        elif evento in ["DISTRIBUCION_VENTA", "IMPULSO_BAJISTA"]:
+            tp_price = precio_actual * (1 - OPTUNA_TAKE_PROFIT)
+            sl_price = precio_actual * (1 + OPTUNA_STOP_LOSS)
+            targets_txt = f"\n   🎯 TP: {Fore.GREEN}{tp_price:.2f}{Style.RESET_ALL} | 🛡️ SL: {Fore.RED}{sl_price:.2f}{Style.RESET_ALL}"
+
+            if evento == "DISTRIBUCION_VENTA":
+                msg_color = Fore.MAGENTA
+                msg_texto = f"🧱 DISTRIBUCIÓN BAJISTA (Ballenas Vendiendo)"
+            else:
+                msg_color = Fore.RED
+                msg_texto = f"📉 IMPULSO BAJISTA (Confirmado)"
+        
+        # NEUTRAL
+        elif evento == "RANGO_NEUTRAL":
+            msg_texto = f"⏸️  NEUTRAL (Sin dirección clara)"
+
+    print(f"🐋 {Style.BRIGHT}MICRO (Estrategia 5m):{Style.RESET_ALL}")
+    print(f"   Estado      : {msg_color}{msg_texto}{Style.RESET_ALL} {targets_txt}")
+    print(f"   Flow (Inst) : [{color_state}{barra_str}{Style.RESET_ALL}] {desbalance:.2f}")
+    print("-" * 80)
 
 # --- BUCLE PRINCIPAL ---
 def main():
-    print("Iniciando Sistema Ballenas IA...")
+    print("Iniciando Sistema Ballenas IA (Edición Completa)...")
     
     # 1. Instancias
     mt5_con = MT5Connector() 
     if not mt5_con.conectar(): return
 
     micro_analyzer = MicrostructureAnalyzer() 
-    whale_strategy = WhaleDetector(ventana_segundos=300) # Análisis de 5 minutos
+    whale_strategy = WhaleDetector(ventana_segundos=300) 
     technical_calc = TechnicalIndicators() 
     logger = DataLogger() 
     predictor = MarketPredictor() 
     
-    # Verificación de carga
-    if not predictor.loaded:
-        print(Fore.RED + "ADVERTENCIA: No se pudieron cargar los modelos en MarketPredictor.")
-        time.sleep(2)
-    else:
-        print(Fore.GREEN + "[IA] Modelos listos para inferencia.")
+    # BRAZO ROBÓTICO
+    trader = MT5Trader(SYMBOL, LOT_SIZE, MAGIC_NUMBER)
     
     print("Sincronizando histórico...")
-    # Carga inicial robusta
     df_raw_pl = mt5_con.obtener_velas_recientes(SYMBOL, timeframe=TIMEFRAME, num_velas=HISTORY_BARS)
-    
-    if df_raw_pl is None or df_raw_pl.height == 0:
-        print("Error: No se pudo obtener histórico inicial.")
-        return
+    if df_raw_pl is None: return
         
     print(Fore.GREEN + "Sistema EN LÍNEA. Escuchando mercado...")
     time.sleep(1)
@@ -197,111 +217,94 @@ def main():
         grabando = False
         ultimo_segundo = 0
         df_ticks_acumulado = pl.DataFrame()
+        
+        # Control de disparo (Cooldown)
+        ultimo_disparo_ts = 0 
+        COOLDOWN_SEG = 300 # 5 min entre operaciones
 
         while True:
-            # A. TICK EN TIEMPO REAL
             tick_raw = mt5_lib.symbol_info_tick(SYMBOL)
             
             if tick_raw:
                 tick = tick_raw._asdict()
+                ts_actual_sec = int(time.time())
                 
                 # 1. Acumular Tick
                 nuevo_tick = pl.DataFrame({
-                    "time": [tick['time']], 
-                    "bid": [tick['bid']], 
-                    "ask": [tick['ask']], 
-                    "flags": [tick['flags']],
-                    "timestamp_ms": [int(time.time() * 1000)]
+                    "time": [tick['time']], "bid": [tick['bid']], "ask": [tick['ask']], 
+                    "flags": [tick['flags']], "timestamp_ms": [int(time.time() * 1000)]
                 })
-                
                 try:
                     df_ticks_acumulado = pl.concat([df_ticks_acumulado, nuevo_tick])
-                    if df_ticks_acumulado.height > 1000:
-                        df_ticks_acumulado = df_ticks_acumulado.tail(1000)
-                except:
-                    df_ticks_acumulado = nuevo_tick
+                    if df_ticks_acumulado.height > 1000: df_ticks_acumulado = df_ticks_acumulado.tail(1000)
+                except: df_ticks_acumulado = nuevo_tick
 
-                # 2. Análisis Micro (Instantáneo)
+                # 2. Análisis Micro
                 metrics_micro = micro_analyzer.analizar_flujo(df_ticks_acumulado)
+                precio_ask = tick['ask'] # Para comprar
+                precio_bid = tick['bid'] # Para vender
 
-                # 3. Análisis de Estrategia (Acumulado 5 min)
-                ts_actual_sec = int(time.time())
-                precio_actual_tick = tick['bid'] 
-                score_actual = metrics_micro.get('desbalance', 0.0)
-                
-                # Detectar Divergencias (Absorción/Distribución)
-                tipo_evento, avg_pressure = whale_strategy.detectar_estrategia(ts_actual_sec, score_actual, precio_actual_tick)
-                
+                # 3. Estrategia
+                tipo_evento, avg_pressure = whale_strategy.detectar_estrategia(ts_actual_sec, metrics_micro.get('desbalance',0), precio_bid)
                 metrics_micro['evento'] = tipo_evento
                 metrics_micro['presion_acumulada'] = avg_pressure
 
-                # 4. Análisis Macro (Velas)
-                ts_actual = int(tick['time'])
+                # ---------------------------------------------------------
+                # 🔥 AUTO-TRADING 🔥
+                # ---------------------------------------------------------
+                ya_operando = trader.tengo_posicion_abierta()
+                
+                if not ya_operando and (ts_actual_sec - ultimo_disparo_ts > COOLDOWN_SEG):
+                    
+                    # COMPRA
+                    if tipo_evento in ["ABSORCION_COMPRA", "IMPULSO_ALCISTA"]:
+                        tp = precio_ask * (1 + OPTUNA_TAKE_PROFIT)
+                        sl = precio_ask * (1 - OPTUNA_STOP_LOSS)
+                        
+                        print(f"\n🚀 DETECTADO: {tipo_evento}. DISPARANDO COMPRA...")
+                        if trader.enviar_orden(mt5_lib.ORDER_TYPE_BUY, precio_ask, sl, tp):
+                            ultimo_disparo_ts = ts_actual_sec
+
+                    # VENTA
+                    elif tipo_evento in ["DISTRIBUCION_VENTA", "IMPULSO_BAJISTA"]:
+                        tp = precio_bid * (1 - OPTUNA_TAKE_PROFIT)
+                        sl = precio_bid * (1 + OPTUNA_STOP_LOSS)
+                        
+                        print(f"\n📉 DETECTADO: {tipo_evento}. DISPARANDO VENTA...")
+                        if trader.enviar_orden(mt5_lib.ORDER_TYPE_SELL, precio_bid, sl, tp):
+                            ultimo_disparo_ts = ts_actual_sec
+                # ---------------------------------------------------------
+
+                # 4. Análisis Macro y Visualización
+                ts_candle = int(tick['time'])
                 metrics_macro = {}
                 ia_result = {}
                 
-                if ts_actual > ultimo_segundo:
-                    # B. OBTENER VELAS RECIENTES
+                if ts_candle > ultimo_segundo:
                     df_candles = mt5_con.obtener_velas_recientes(SYMBOL, timeframe=TIMEFRAME, num_velas=1000)
-                    
                     if df_candles is not None and df_candles.height > 300:
-                        # C. CALCULAR INDICADORES
                         metrics_macro = technical_calc.calcular_features(df_candles)
-                        
-                        # D. PREDICCIÓN IA
                         if predictor.loaded and metrics_macro:
-                            regimen, probs = predictor.predecir(metrics_macro)
-                            
-                            ia_result = {
-                                "regimen": regimen,
-                                "probs": probs
-                            }
-                            
-                            metrics_macro["Regimen_Actual"] = regimen
-                            metrics_macro["probs"] = probs
-                            for i, p in enumerate(probs):
-                                metrics_macro[f"prob_regimen_{i}"] = p
+                            reg, probs = predictor.predecir(metrics_macro)
+                            ia_result = {"regimen": reg, "probs": probs}
+                            metrics_macro["Regimen_Actual"] = reg
+                            for i, p in enumerate(probs): metrics_macro[f"prob_regimen_{i}"] = p
                     
-                    ultimo_segundo = ts_actual
+                    ultimo_segundo = ts_candle
+                    render_dashboard(metrics_micro, metrics_macro, grabando, ia_result, ya_operando)
 
-                    # E. VISUALIZAR
-                    render_dashboard(metrics_micro, metrics_macro, grabando, ia_result)
-
-                    # F. GUARDAR
-                    if metrics_macro and metrics_micro.get("status") == "OK":
-                        ts_ms = int(time.time() * 1000)
-                        
-                        logger.guardar_snapshot(ts_ms, metrics_micro, metrics_macro, df_ticks_acumulado)
-                        
-                        lite_path = os.path.join("data", "raw", "live_lite.csv")
-                        row_lite = [
-                            ts_ms,
-                            metrics_macro.get("Close_Price", 0),
-                            metrics_macro.get("EMA_Princ", 0),
-                            metrics_micro.get("desbalance", 0),
-                            ia_result.get("regimen", 0)
-                        ]
-                        try:
-                            file_exists = os.path.exists(lite_path)
-                            with open(lite_path, mode='a', newline='') as f:
-                                writer = csv.writer(f)
-                                if not file_exists:
-                                    writer.writerow(["Timestamp", "Close_Price", "EMA_Princ", "Micro_Score", "Regimen_Actual"])
-                                writer.writerow(row_lite)
-                        except: pass
-                        
+                    if metrics_macro:
+                        logger.guardar_snapshot(ts_actual_sec*1000, metrics_micro, metrics_macro, df_ticks_acumulado)
                         grabando = True
 
             time.sleep(0.01)
 
     except KeyboardInterrupt:
         mt5_con.desconectar()
-        print("\nMonitor detenido.")
+        print("\nBot detenido.")
     except Exception as e:
-        print(f"\nERROR CRÍTICO: {e}")
-        import traceback
-        traceback.print_exc()
-        if 'mt5_con' in locals(): mt5_con.desconectar()
+        print(f"\nERROR: {e}")
+        mt5_con.desconectar()
 
 if __name__ == "__main__":
     main()

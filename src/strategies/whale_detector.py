@@ -41,7 +41,7 @@ class WhaleDetector:
         avg_score = sum(d['score'] for d in self.history) / len(self.history)
 
         # UMBRALES (Ajustados para promedios, que suelen ser más suaves)
-        UMBRAL_INTENSIDAD = 0.15 
+        UMBRAL_INTENSIDAD = 0.09 
         
         # --- LÓGICA DE DIVERGENCIA ACUMULADA ---
 
