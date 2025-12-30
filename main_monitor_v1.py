@@ -17,6 +17,7 @@ from src.features.microstructure import MicrostructureAnalyzer
 from src.features.indicators import TechnicalIndicators 
 from src.utils.logger import DataLogger
 from src.models.predictor import MarketPredictor
+from src.strategies.whale_detector import WhaleDetector # <--- CEREBRO ESTRATÉGICO
 
 init(autoreset=True)
 
@@ -49,7 +50,7 @@ def render_dashboard(micro, macro, grabando, ia_data):
     print(Fore.WHITE + Back.BLUE + Style.BRIGHT + titulo.ljust(60) + Style.RESET_ALL + " " + rec_icon)
     print("-" * 70)
     
-    # SECCIÓN 1: IA
+    # SECCIÓN 1: IA (MACRO)
     if ia_data and "regimen" in ia_data:
         reg_id = ia_data["regimen"]
         probs = ia_data["probs"]
@@ -87,7 +88,7 @@ def render_dashboard(micro, macro, grabando, ia_data):
 
     print("-" * 70)
 
-    # SECCIÓN 2: MACRO
+    # SECCIÓN 2: DATOS TÉCNICOS
     if macro:
         precio = macro.get('Close_Price', 0.0)
         ema = macro.get('EMA_Princ', 0.0)
@@ -103,11 +104,12 @@ def render_dashboard(micro, macro, grabando, ia_data):
 
     print("-" * 70)
     
-    # SECCIÓN 3: MICRO
+    # SECCIÓN 3: MICROESTRUCTURA Y ESTRATEGIA
     if micro.get("status") == "EMPTY":
         print(Fore.RED + "Esperando flujo de ticks...")
         return
 
+    # A. Visualización Barra Instantánea
     desbalance = micro.get('desbalance', 0.0)
     bar_length = 30
     normalized_pos = int((desbalance + 1) / 2 * bar_length)
@@ -130,10 +132,33 @@ def render_dashboard(micro, macro, grabando, ia_data):
     barra[normalized_pos] = f"{Style.BRIGHT}{marcador}{Style.RESET_ALL}{color_state}"
     barra_str = "".join(barra)
 
+    # B. Mensajes de Estrategia (5 min)
+    evento = micro.get('evento', "NEUTRAL")
+    presion_avg = micro.get('presion_acumulada', 0.0)
+    
+    msg_color = Fore.WHITE
+    msg_texto = "RECOPILANDO DATA (Esperando ventana)..."
+    
+    if evento == "ABSORCION_COMPRA":
+        msg_color = Fore.CYAN
+        msg_texto = f"🛡️  ABSORCIÓN (5m): Venta Avg {presion_avg:.2f} vs Precio Sube/Igual"
+    elif evento == "DISTRIBUCION_VENTA":
+        msg_color = Fore.MAGENTA
+        msg_texto = f"🧱 DISTRIBUCIÓN (5m): Compra Avg {presion_avg:.2f} vs Precio Baja/Igual"
+    elif evento == "IMPULSO_ALCISTA":
+        msg_color = Fore.GREEN
+        msg_texto = f"🚀 TENDENCIA (5m): Fuerza Compra Sostenida ({presion_avg:.2f})"
+    elif evento == "IMPULSO_BAJISTA":
+        msg_color = Fore.RED
+        msg_texto = f"📉 TENDENCIA (5m): Fuerza Venta Sostenida ({presion_avg:.2f})"
+    elif evento == "RANGO_NEUTRAL":
+        msg_texto = f"⏸️  NEUTRAL (5m): Presión Avg {presion_avg:.2f}"
+
     print(f"🐋 {Style.BRIGHT}MICRO (Flow):{Style.RESET_ALL}")
-    print(f"   Estado    : {color_state}{estado_txt}{Style.RESET_ALL}")
-    print(f"   Score     : {desbalance:.4f}")
-    print(f"   Balance   : [{color_state}{barra_str}{Style.RESET_ALL}]")
+    print(f"   Instantáneo : {color_state}{estado_txt}{Style.RESET_ALL} (Score: {desbalance:.2f})")
+    print(f"   Balance     : [{color_state}{barra_str}{Style.RESET_ALL}]")
+    print("-" * 70)
+    print(f"⏱️ {Style.BRIGHT}ANÁLISIS (5 min): {msg_color}{msg_texto}{Style.RESET_ALL}") 
     print("-" * 70)
 
 # --- BUCLE PRINCIPAL ---
@@ -145,6 +170,7 @@ def main():
     if not mt5_con.conectar(): return
 
     micro_analyzer = MicrostructureAnalyzer() 
+    whale_strategy = WhaleDetector(ventana_segundos=300) # Análisis de 5 minutos
     technical_calc = TechnicalIndicators() 
     logger = DataLogger() 
     predictor = MarketPredictor() 
@@ -195,17 +221,27 @@ def main():
                 except:
                     df_ticks_acumulado = nuevo_tick
 
-                # 2. Análisis Micro
+                # 2. Análisis Micro (Instantáneo)
                 metrics_micro = micro_analyzer.analizar_flujo(df_ticks_acumulado)
 
-                # 3. Análisis Macro
+                # 3. Análisis de Estrategia (Acumulado 5 min)
+                ts_actual_sec = int(time.time())
+                precio_actual_tick = tick['bid'] 
+                score_actual = metrics_micro.get('desbalance', 0.0)
+                
+                # Detectar Divergencias (Absorción/Distribución)
+                tipo_evento, avg_pressure = whale_strategy.detectar_estrategia(ts_actual_sec, score_actual, precio_actual_tick)
+                
+                metrics_micro['evento'] = tipo_evento
+                metrics_micro['presion_acumulada'] = avg_pressure
+
+                # 4. Análisis Macro (Velas)
                 ts_actual = int(tick['time'])
                 metrics_macro = {}
                 ia_result = {}
                 
                 if ts_actual > ultimo_segundo:
-                    # B. OBTENER VELAS RECIENTES - CORREGIDO AQUÍ
-                    # Pedimos 1000 velas para que el motor de indicadores (que exige >300) funcione
+                    # B. OBTENER VELAS RECIENTES
                     df_candles = mt5_con.obtener_velas_recientes(SYMBOL, timeframe=TIMEFRAME, num_velas=1000)
                     
                     if df_candles is not None and df_candles.height > 300:
